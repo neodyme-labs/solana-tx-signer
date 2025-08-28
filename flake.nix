@@ -2,63 +2,102 @@
   description = "Solana Transaction Signer";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
-  outputs = { self, nixpkgs }:
-  let
-    systems = [ "x86_64-linux" "aarch64-linux" ];
+  outputs =
+    { self, nixpkgs }:
+    let
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
 
-    forAllSystems = f:
-      builtins.listToAttrs (map (system: {
-        name = system;
-        value = f system;
-      }) systems);
+      forAllSystems =
+        f:
+        builtins.listToAttrs (
+          map (system: {
+            name = system;
+            value = f system;
+          }) systems
+        );
 
-    mkPkgs = system: import nixpkgs { inherit system; };
-  in {
-    packages = forAllSystems (system:
-      let pkgs = mkPkgs system;
-      in {
-        default = pkgs.rustPlatform.buildRustPackage {
-          pname = "solana-tx-signer";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock = { lockFile = ./Cargo.lock; };
+      mkPkgs = system: import nixpkgs { inherit system; };
+    in
+    {
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = mkPkgs system;
 
-          nativeBuildInputs = [
-            pkgs.pkg-config
-          ];
+          inherit (pkgs) lib;
+        in
+        {
+          default = pkgs.rustPlatform.buildRustPackage (
+            finalAttrs:
+            let
+              toml = with builtins; (fromTOML (readFile "${finalAttrs.src}/Cargo.toml"));
+            in
+            {
+              pname = "solana-tx-signer";
+              version = toml.package.version;
+              src = self;
 
-          buildInputs = [
-            pkgs.openssl
-            pkgs.udev
-          ];
+              cargoLock = {
+                lockFile = "${finalAttrs.src}/Cargo.lock";
+              };
 
-          OPENSSL_NO_VENDOR = 1;
-        };
-      });
+              nativeBuildInputs = with pkgs; [
+                pkg-config
+              ];
 
-    apps = forAllSystems (system: {
-      default = {
-        type = "app";
-        program = "${self.packages.${system}.default}/bin/solana-tx-signer";
-      };
-    });
+              buildInputs = with pkgs; [
+                openssl
+                udev
+              ];
 
-    devShells = forAllSystems (system:
-      let pkgs = mkPkgs system;
-      in {
-        default = pkgs.mkShell {
-          buildInputs = [
-            pkgs.rustc
-            pkgs.cargo
-            pkgs.pkg-config
-            pkgs.openssl
-            pkgs.udev
-          ];
-          OPENSSL_NO_VENDOR = 1;
-        };
-      });
-  };
+              env = {
+                OPENSSL_NO_VENDOR = 1;
+              };
+
+              meta = {
+                description = "Bare-bones tool to sign raw Solana transaction messages with a keyfile.";
+                homepage = toml.package.repository;
+                sourceProvenance = [ lib.sourceTypes.fromSource ];
+
+                license = with lib.licenses; [
+                  asl20
+                  mit
+                ];
+
+                maintainers = [
+                  {
+                    name = "Thomas Lambertz";
+                    email = "thomas.lambertz@neodyme.io";
+                    github = "tlambertz";
+                    githubId = 58152939;
+                  }
+                ];
+              };
+            }
+          );
+        }
+      );
+
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = mkPkgs system;
+        in
+        {
+          default = pkgs.mkShell {
+            inputsFrom = [ self.packages.${system}.default ];
+
+            env = {
+              OPENSSL_NO_VENDOR = 1;
+            };
+          };
+        }
+      );
+    };
 }
